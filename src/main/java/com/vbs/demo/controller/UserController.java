@@ -3,9 +3,10 @@ package com.vbs.demo.controller;
 import com.vbs.demo.dto.DisplayDto;
 import com.vbs.demo.dto.LoginDto;
 import com.vbs.demo.dto.UpdateDto;
+import com.vbs.demo.models.History;
 import com.vbs.demo.models.User;
+import com.vbs.demo.repositories.HistoryRepo;
 import com.vbs.demo.repositories.UserRepo;
-import org.aspectj.weaver.patterns.AndSignaturePattern;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
 import org.springframework.web.bind.annotation.*;
@@ -18,89 +19,155 @@ public class UserController {
 
     @Autowired
     UserRepo userRepo;
+    @Autowired
+    HistoryRepo historyRepo;
 
+    //SignUp-UI
     @PostMapping("/register")
     public String register(@RequestBody User user) {
+        History history = new History();
+        history.setDescription("User " + user.getUsername() + " self created");
+
+        historyRepo.save(history);
         userRepo.save(user);
-        return "Signup Successfull";
+
+        return "Sign-Up Successful";
     }
 
-
+    //LogIn-UI
     @PostMapping("/login")
     public String login(@RequestBody LoginDto u) {
         User user = userRepo.findByUsername(u.getUsername());
 
-        if (user == null) {
+        if(user == null) {
             return "User not found";
         }
-        if (!u.getPassword().equals(user.getPassword())) {
-            return "Password Incorrect";
+
+        if(!u.getPassword().equals(user.getPassword())) {
+            return "Password Mismatch";
         }
-        if (!u.getRole().equals(user.getRole())) {
-            return "Role Incorrect";
+
+        if(!u.getRole().equals(user.getRole())) {
+            return "Role Mismatch";
         }
+
         return String.valueOf(user.getId());
     }
 
-
+    //Dashboard-UI
     @GetMapping("/get-details/{id}")
     public DisplayDto display(@PathVariable int id) {
-        User user = userRepo.findById(id)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+        //id is primary key hence we need to resolve any exceptions
+        User user = userRepo.findById(id).orElseThrow(()->new RuntimeException("User not found"));
+
         DisplayDto displayDto = new DisplayDto();
         displayDto.setUsername(user.getUsername());
         displayDto.setBalance(user.getBalance());
-        return displayDto;
 
+        return displayDto;
     }
 
+    //Dashboard-Update-Details-UI
     @PostMapping("/update")
     public String update(@RequestBody UpdateDto obj) {
-        User user = userRepo.findById(obj.getId())
-                .orElseThrow(() -> new RuntimeException("Not Found"));
-        if (obj.getKey().equalsIgnoreCase("name")) {
-            if (user.getName().equals(obj.getValue())) return "Cannot Be Same";
+        User user = userRepo.findById(obj.getId()).orElseThrow(()->new RuntimeException("User not found"));
+        History history = new History();
+
+        if(obj.getKey().equalsIgnoreCase("name")){
+            if(obj.getValue().equals(user.getName())){
+                return "Same Username";
+            }
+
+            history.setDescription("User " + user.getUsername() + " Changed Name from " + user.getName() + " to " + obj.getValue());
+
             user.setName(obj.getValue());
-        } else if (obj.getKey().equalsIgnoreCase("Password")) {
-            if (user.getPassword().equals(obj.getValue())) return "Cannot Be Same";
-            user.setPassword(obj.getValue());
-        } else if (obj.getKey().equalsIgnoreCase("Email")) {
-            if (user.getEmail().equals(obj.getValue())) return "Cannot Be Same";
-            User user2 = userRepo.findByEmail(obj.getValue());
-            if (user2 != null) return "Email Already Exists";
-            user.setEmail(obj.getValue());
-        } else {
-            return "Invalid Key";
         }
+        else if(obj.getKey().equalsIgnoreCase("password")) {
+            if(obj.getValue().equals(user.getPassword())){
+                return "Same Password";
+            }
+
+            history.setDescription("User " + user.getUsername() + " Changed Password");
+
+            user.setPassword(obj.getValue());
+        }
+        else if(obj.getKey().equalsIgnoreCase("email")) {
+            if(obj.getValue().equals(user.getEmail())){
+                return "Same Email";
+            }
+
+            if(userRepo.findByEmail(obj.getValue()) != null) {
+                return "Email already exists";
+            }
+
+            history.setDescription("user " + user.getUsername() + " Changed Email from " + user.getEmail() + " to " + obj.getValue());
+
+            user.setEmail(obj.getValue());
+        }
+        else {
+            return "Invalid field";
+        }
+
+        historyRepo.save(history);
         userRepo.save(user);
+
         return "Updated Successfully";
     }
 
-    @PostMapping("/add")
-    public String add(@RequestBody User user) {
+    //Admin-Add-User-UI
+    @PostMapping("/add/{adminId}")
+    public String add(@RequestBody User user,@PathVariable int adminId) {
+
+        History history = new History();
+        history.setDescription("Admin " + adminId + " added user " + user.getUsername() + " Successfully");
+
+        historyRepo.save(history);
         userRepo.save(user);
-        return "Added Successfully";
+
+        return "Added " + user.getName() + " Successfully";
     }
 
+    //Admin-All-Users-Sort-Order-UI
     @GetMapping("/users")
-    public List<User> getAllusers(@RequestParam String sortBy,@RequestParam String order)
-    {
+    public List<User> getAllUsers(@RequestParam String sortBy, @RequestParam String order) {
         Sort sort;
-        if (order.equalsIgnoreCase("desc"))
-        {
+
+        if(order.equalsIgnoreCase("desc")) {
             sort = Sort.by(sortBy).descending();
         }
-        else
-        {
+        else {
             sort = Sort.by(sortBy).ascending();
         }
 
-    return userRepo.findAllByRole("customer",sort);
+        return userRepo.findAllByRole("customer",sort);
     }
 
-    @GetMapping("/users/{keyword}")
-    public List<User> getUsers(@PathVariable String keyword)
-    {
-        return  userRepo.findByUsernameContainingIgnoreCaseAndRole(keyword,"customer");
+    //Admin-All-Users-Search-UI
+    @GetMapping("/users/{searchTerm}")
+    public List<User> searchUsers(@PathVariable String searchTerm) {
+
+        return userRepo.findByUsernameContainingIgnoreCaseAndRole(searchTerm,"customer");
     }
+
+    //Admin-All-Users-Delete-UI
+    @DeleteMapping("/delete-user/{userId}/admin/{adminId}")
+    public String delete(@PathVariable int userId, @PathVariable int adminId) {
+        User user = userRepo.findById(userId).orElseThrow(()-> new RuntimeException("User not found"));
+        History history = new History();
+
+        if(userId == adminId){
+            return "Admin cannot delete themselves";
+        }
+        if(user.getBalance() > 0) {
+            return "Balance should be zero";
+        }
+
+        history.setDescription("Admin " + adminId + " deleted user " + user.getUsername() + " Successfully");
+
+        historyRepo.save(history);
+        userRepo.delete(user);
+
+        return "Deleted " + user.getUsername() + " Successfully";
+    }
+
 }
